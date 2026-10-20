@@ -32,7 +32,7 @@ libcap-dev libdrm-dev libevdev-dev libnuma-dev libopus-dev libpulse-dev
 libva-dev libvdpau-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcb-shm0-dev
 libxcb-xfixes0-dev libxcb-shape0-dev libxcb-render0-dev libxfixes-dev
 libxrandr-dev libxtst-dev libxinerama-dev libxcursor-dev libxi-dev
-libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-tools
+libappindicator3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-tools
 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad""".split()
 
 
@@ -211,7 +211,7 @@ def main():
              "-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG -g0",
              "-DSUNSHINE_ENABLE_JETSON=ON", "-DSUNSHINE_ENABLE_CUDA=OFF",
              "-DSUNSHINE_ENABLE_DRM=OFF", "-DSUNSHINE_ENABLE_WAYLAND=OFF",
-             "-DSUNSHINE_ENABLE_X11=ON", "-DSUNSHINE_ENABLE_TRAY=OFF",
+             "-DSUNSHINE_ENABLE_X11=ON", "-DSUNSHINE_ENABLE_TRAY=ON",
              "-DCMAKE_INSTALL_PREFIX=" + str(stage), "-DSUNSHINE_ASSETS_DIR=share/sunshine",
              "-DSUNSHINE_EXECUTABLE_PATH=" + str(stage / "bin/sunshine")], env=env)
     check_build_memory(args.jobs)

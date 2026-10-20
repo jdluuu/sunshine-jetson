@@ -19,6 +19,7 @@
 
   // standard includes
   #include <csignal>
+  #include <cstdlib>
   #include <string>
 
   // lib includes
@@ -217,6 +218,14 @@ namespace system_tray {
     // This ensures the tray icon works reliably after a logoff/logon cycle.
     while (GetShellWindow() == nullptr) {
       Sleep(1000);
+    }
+  #endif
+
+  #if defined(__linux__)
+    if (const char *icon = std::getenv("SUNSHINE_TRAY_ICON")) {
+      if (boost::filesystem::is_regular_file(icon)) {
+        tray.icon = icon;
+      }
     }
   #endif
 
