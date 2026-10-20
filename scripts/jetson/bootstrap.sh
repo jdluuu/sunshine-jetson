@@ -7,7 +7,7 @@ if (( EUID == 0 )); then
   exit 1
 fi
 repo=https://github.com/jdluuu/sunshine-jetson.git
-ref=v0.20.0-jetson.1
+ref=v0.20.0-jetson.2
 if ! command -v git >/dev/null || ! command -v python3 >/dev/null; then
   sudo apt-get update
   sudo apt-get install -y --no-install-recommends git python3 ca-certificates

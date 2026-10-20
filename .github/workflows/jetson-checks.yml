@@ -15,8 +15,10 @@ jobs:
       - name: Check bootstrap and Python syntax
         run: |
           bash -n scripts/jetson/bootstrap.sh
-          python3 -m py_compile scripts/jetson/install.py scripts/jetson/manage.py
+          python3 -m py_compile scripts/jetson/*.py
           python3 scripts/jetson/install.py --help
+          python3 scripts/jetson/appimage_run.py --help
+          python3 scripts/jetson/package_appimage.py --help
       - name: Installer regression tests
         run: python3 -m unittest discover -s tests -p 'test_jetson_install.py' -v
       - name: Verify locked web assets

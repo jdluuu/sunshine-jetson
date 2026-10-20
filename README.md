@@ -23,13 +23,32 @@
 输出宽高需为偶数。**Orin Nano 没有本方案所需的 NVENC，不能使用此脚本。**
 这是基于旧版 Sunshine 的专用适配，尚未合入后续上游版本的修复；请用于可信局域网。
 
-## 一键安装
+## AppImage（免编译）
+
+下载 [ARM64 / JetPack 5 AppImage](https://github.com/jdluuu/sunshine-jetson/releases/download/v0.20.0-jetson.2/Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage)，
+在 NX 的 Xorg 桌面终端运行：
+
+```bash
+chmod +x Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage
+./Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage --check
+# 仅在提示缺少键鼠权限时，执行一次（会使用 sudo）
+./Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage --setup-input
+./Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage
+```
+
+启动前关闭其他 Sunshine，之后访问 `https://localhost:47990` 设置账号并在 Moonlight 配对。
+AppImage 的独立配置保存在 `~/.config/sunshine-jetson-appimage/`，
+不自动迁移旧账号或配对，不修改原有 Sunshine 的配置和启动项。
+支持范围与上表一致，仍需要匹配的 JetPack 驱动和 GStreamer 插件。
+详细依赖、测试和打包说明见下文“构建 AppImage”。
+
+## 一键源码安装
 
 在 **NX 的 Xorg 桌面终端**，用当前桌面用户执行。不要用 root 或 `sudo bash`。
 需要网络和 sudo 权限；安装系统依赖时可能要求输入本机密码。
 
 ```bash
-curl -fL --retry 3 https://raw.githubusercontent.com/jdluuu/sunshine-jetson/v0.20.0-jetson.1/scripts/jetson/bootstrap.sh -o /tmp/install-sunshine-jetson.sh && bash /tmp/install-sunshine-jetson.sh
+curl -fL --retry 3 https://raw.githubusercontent.com/jdluuu/sunshine-jetson/v0.20.0-jetson.2/scripts/jetson/bootstrap.sh -o /tmp/install-sunshine-jetson.sh && bash /tmp/install-sunshine-jetson.sh
 ```
 
 脚本将：
@@ -37,14 +56,15 @@ curl -fL --retry 3 https://raw.githubusercontent.com/jdluuu/sunshine-jetson/v0.2
 1. 检查 Orin NX、L4T R35、NVENC 设备及 GStreamer 插件。
 2. 通过 apt 安装构建依赖，在独立 Python 环境中准备 CMake 3.27.9；
    按锁文件安装网页依赖，跳过 npm 生命周期脚本。
-3. 获取固定版本子模块，以 `nice -n 15`、**`-j16`** 编译。
+3. 获取固定版本子模块，以 `nice -n 15`、**`-j2`** 编译。
 4. 编码 90 帧测试画面，并检查第 0、30、60 帧的 IDR / SPS / PPS。
 5. 安装完整程序和网页资源，配置当前用户对 `/dev/uinput` 的访问。
 6. 从活动显示器中选择主屏，启动 Sunshine，并设置桌面登录后自动启动。
 
-编译需要至少 8 GiB 可用磁盘，以及约 15 GiB 内存与交换空间总量。
-开始编译前，可用内存与空闲交换空间合计需至少 12 GiB。
-8GB 型号通常需要增加交换空间；脚本不会自动修改交换空间。
+编译需要至少 8 GiB 可用磁盘。默认 `-j2` 要求可用内存至少约 5 GiB，
+不把 swap/zram 当成额外物理内存计入。
+内存紧张时可使用 `--jobs 1`（预检查要求约 3 GiB）；脚本不会自动修改交换空间。
+这是编译前的余量检查，不保证其他程序在编译期间不会耗尽内存。
 不会升级 JetPack 或安装新的 NVIDIA 驱动。
 
 如果已有其他 Sunshine 在运行，安装完成后会提示先关闭旧实例，
@@ -58,7 +78,7 @@ curl -fL --retry 3 https://raw.githubusercontent.com/jdluuu/sunshine-jetson/v0.2
 ## 从源码自行编译
 
 ```bash
-git clone --branch v0.20.0-jetson.1 https://github.com/jdluuu/sunshine-jetson.git
+git clone --branch v0.20.0-jetson.2 https://github.com/jdluuu/sunshine-jetson.git
 cd sunshine-jetson
 python3 scripts/jetson/install.py
 ```
@@ -82,9 +102,61 @@ python3 scripts/jetson/install.py --output DP-1 --no-autostart
 python3 scripts/jetson/install.py --help
 ```
 
-支持 `--jobs N`，其中 N 至少为 16。安装目录可通过 `--prefix` 指定，
+支持 `--jobs N`，默认 2，最小为 1；提高并发会增加内存预检查要求。安装目录可通过 `--prefix` 指定，
 但必须位于当前用户主目录中。通过 SSH 安装时如未设置图形会话环境，
 脚本会完成安装，并提示回到桌面终端启动。
+
+## 构建 AppImage（实验性）
+
+AppImage 可以省去其他用户的源码编译，但本包仍限定 **Orin NX / JetPack 5 /
+Ubuntu 20.04 / Xorg**。NVIDIA 驱动、`nvvidconv`、`nvv4l2h264enc`、
+GStreamer 核心和桌面音视频库使用宿主机版本，避免混用 JetPack 的驱动 ABI。
+不能把同一个包视为适用于 JetPack 6/7、Orin Nano 或 x86 电脑。
+
+先执行上述 `--build-only` 流程准备依赖、源码、网页资源与编码测试程序，然后：
+
+```bash
+build-jetson/tools/bin/cmake -S . -B build-jetson/cmake \
+  -DSUNSHINE_CONFIGURE_APPIMAGE=ON -DCMAKE_INSTALL_PREFIX=/usr \
+  -DSUNSHINE_ASSETS_DIR=share/sunshine \
+  -DSUNSHINE_EXECUTABLE_PATH=/usr/bin/sunshine
+nice -n 15 build-jetson/tools/bin/cmake --build build-jetson/cmake -j2
+```
+
+准备 `squashfs-tools` 和 [AppImage 官方 aarch64 type-2 runtime](https://github.com/AppImage/type2-runtime/releases)；
+从官方发布元数据取得 SHA256，并保存该项目的 LICENSE。不要将 NVIDIA 驱动复制进包。
+
+```bash
+python3 scripts/jetson/package_appimage.py \
+  --binary build-jetson/cmake/sunshine \
+  --probe build-jetson/jetson-probe \
+  --assets build-jetson/stage/share/sunshine \
+  --runtime /path/to/runtime-aarch64 \
+  --runtime-license /path/to/APPIMAGE-RUNTIME-LICENSE \
+  --runtime-sha256 <官方运行时的SHA256> \
+  --output /path/to/Sunshine-Jetson-jp5-aarch64.AppImage
+```
+
+打包脚本检查可移动资源路径、ARM64 运行时和摘要，收集通用依赖及许可证，
+并生成包的 SHA256 和依赖清单。打包后应在真实 NX 上检查：
+
+```bash
+chmod +x Sunshine-Jetson-jp5-aarch64.AppImage
+./Sunshine-Jetson-jp5-aarch64.AppImage --check
+./Sunshine-Jetson-jp5-aarch64.AppImage --probe /tmp/appimage-probe.h264
+# 首次使用、且 --check 提示没有键鼠权限时执行一次
+./Sunshine-Jetson-jp5-aarch64.AppImage --setup-input
+# 在 Xorg 桌面终端启动；先关闭其他 Sunshine
+./Sunshine-Jetson-jp5-aarch64.AppImage
+```
+
+默认配置、账号和配对保存在 `~/.config/sunshine-jetson-appimage/`，
+首次使用需访问 `https://localhost:47990` 设置账号并重新配对。
+本启动器不设置自动启动，也不修改已有 Sunshine 的配置。
+正常关闭使用终端 `Ctrl+C`。缺少 FUSE 时可加 `--appimage-extract-and-run`。
+系统仍需提供 Python 3、GStreamer 工具和 base/good/bad 插件、
+Xorg/PulseAudio、`xrandr`；`--setup-input` 需要 sudo、acl、kmod 和 udev。
+这不是完整 JetPack 驱动安装器，缺失的 NVIDIA 编码插件需通过匹配的 JetPack 恢复。
 
 ## 启动、日志与回退
 

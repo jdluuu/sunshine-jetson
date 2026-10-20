@@ -74,6 +74,19 @@ def find_cmake(build):
     return cmake
 
 
+def check_build_memory(jobs, meminfo=None):
+    """Check available RAM; Jetson zram swap is not additional physical memory."""
+    text = Path("/proc/meminfo").read_text() if meminfo is None else meminfo
+    available = re.search(r"^MemAvailable:\s+(\d+)", text, re.M)
+    if available is None:
+        raise RuntimeError("无法读取可用内存，未开始编译。")
+    required_gib = 1 + 2 * jobs
+    if int(available.group(1)) < required_gib * 1024 * 1024:
+        raise RuntimeError(
+            "-j" + str(jobs) + " 编译前至少需要约 " + str(required_gib)
+            + " GiB 可用内存（不计 swap/zram）；请关闭占用较大的程序或降低 --jobs。")
+
+
 def configure_input():
     rule = 'KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"\n'
     rule_path = Path("/etc/udev/rules.d/70-sunshine-jetson-uinput.rules")
@@ -159,12 +172,12 @@ def main():
     parser.add_argument("--skip-deps", action="store_true", help="依赖已准备好时跳过 apt（安装时仍会设置输入权限）")
     parser.add_argument("--no-autostart", action="store_true", help="不创建登录自动启动项")
     parser.add_argument("--output", help="显示器名称或编号；默认每次启动选择活动主显示器")
-    parser.add_argument("--jobs", type=int, default=16, help="编译并发数，至少 16")
+    parser.add_argument("--jobs", type=int, default=2, help="编译并发数，默认 2；内存紧张时用 1")
     parser.add_argument("--build-dir", type=Path, default=SOURCE / "build-jetson")
     parser.add_argument("--prefix", type=Path, default=Path.home() / ".local/opt/sunshine-jetson")
     args = parser.parse_args()
-    if args.jobs < 16:
-        parser.error("--jobs 必须至少为 16")
+    if args.jobs < 1:
+        parser.error("--jobs 必须至少为 1")
     platform_check()
     if args.check:
         runtime_check()
@@ -175,13 +188,7 @@ def main():
         raise RuntimeError("--prefix 必须在当前用户主目录中。")
     if root == Path.home().resolve() or any(c in str(root) for c in "\n\r;"):
         raise RuntimeError("不支持这个安装目录。")
-    memory = dict(re.findall(r"^(MemTotal|SwapTotal):\s+(\d+)", Path("/proc/meminfo").read_text(), re.M))
-    if sum(map(int, memory.values())) < 15 * 1024 * 1024:
-        raise RuntimeError("-j16 编译建议至少 15 GiB 内存+交换空间；请先增加交换空间。")
-    available = dict(re.findall(r"^(MemAvailable|SwapFree):\s+(\d+)",
-                                Path("/proc/meminfo").read_text(), re.M))
-    if sum(map(int, available.values())) < 12 * 1024 * 1024:
-        raise RuntimeError("-j16 编译前至少需要 12 GiB 可用内存+空闲交换空间；请先关闭占用较大的程序。")
+    check_build_memory(args.jobs)
     build.mkdir(parents=True, exist_ok=True)
     lock = (build / "install.lock").open("w")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -207,6 +214,7 @@ def main():
              "-DSUNSHINE_ENABLE_X11=ON", "-DSUNSHINE_ENABLE_TRAY=OFF",
              "-DCMAKE_INSTALL_PREFIX=" + str(stage), "-DSUNSHINE_ASSETS_DIR=share/sunshine",
              "-DSUNSHINE_EXECUTABLE_PATH=" + str(stage / "bin/sunshine")], env=env)
+    check_build_memory(args.jobs)
     command(["nice", "-n", "15", cmake, "--build", build / "cmake", "-j" + str(args.jobs)])
     gst_flags = subprocess.check_output(["pkg-config", "--cflags", "--libs",
                                         "gstreamer-app-1.0", "gstreamer-video-1.0"], text=True).split()

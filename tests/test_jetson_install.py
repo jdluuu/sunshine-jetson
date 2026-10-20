@@ -54,6 +54,29 @@ class DisplayTests(unittest.TestCase):
         self.assertEqual(manage.update_config(updated, {"encoder": "jetson", "capture": "x11"}), updated)
 
 
+class BuildMemoryTests(unittest.TestCase):
+    def test_small_parallel_build_accepts_sufficient_available_ram(self):
+        install.check_build_memory(2, "MemAvailable: 6291456 kB\nSwapFree: 0 kB\n")
+
+    def test_swap_does_not_mask_insufficient_physical_memory(self):
+        with self.assertRaisesRegex(RuntimeError, "不计 swap/zram"):
+            install.check_build_memory(2, "MemAvailable: 2097152 kB\nSwapFree: 16777216 kB\n")
+
+    def test_high_parallelism_is_rejected_before_building(self):
+        with self.assertRaisesRegex(RuntimeError, "降低 --jobs"):
+            install.check_build_memory(16, "MemAvailable: 8388608 kB\nSwapFree: 8388608 kB\n")
+
+    def test_single_job_can_fit_when_two_jobs_cannot(self):
+        memory = "MemAvailable: 4194304 kB\nSwapFree: 0 kB\n"
+        install.check_build_memory(1, memory)
+        with self.assertRaises(RuntimeError):
+            install.check_build_memory(2, memory)
+
+    def test_unreadable_memory_information_does_not_start_a_build(self):
+        with self.assertRaisesRegex(RuntimeError, "无法读取"):
+            install.check_build_memory(2, "MemTotal: 16777216 kB\n")
+
+
 class DeployTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="sunshine installer ")
