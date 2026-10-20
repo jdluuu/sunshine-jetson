@@ -48,13 +48,24 @@ def stop(process):
         process.wait()
 
 
-def check_tray(pid, env):
+def check_tray(config, env):
     def call(destination, path, method, *args):
         return subprocess.check_output(
             ["gdbus", "call", "--session", "--dest", destination, "--object-path", path,
              "--method", method] + list(args), env=env, text=True, stderr=subprocess.DEVNULL)
 
     for _ in range(30):
+        pids = set()
+        for proc in Path("/proc").iterdir():
+            if not proc.name.isdigit():
+                continue
+            try:
+                if ((proc / "comm").read_text().strip() == "sunshine"
+                        and str(config / "sunshine.conf") in
+                        (proc / "cmdline").read_text().split("\0")):
+                    pids.add(int(proc.name))
+            except OSError:
+                continue
         items = call("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher",
                      "org.freedesktop.DBus.Properties.Get",
                      "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems")
@@ -63,7 +74,7 @@ def check_tray(pid, env):
             try:
                 owner = call("org.freedesktop.DBus", "/org/freedesktop/DBus",
                              "org.freedesktop.DBus.GetConnectionUnixProcessID", name)
-                if int(re.search(r"uint32 (\d+)", owner).group(1)) != pid:
+                if int(re.search(r"uint32 (\d+)", owner).group(1)) not in pids:
                     continue
                 icon = call(name, "/" + path, "org.freedesktop.DBus.Properties.Get",
                             "org.kde.StatusNotifierItem", "IconName")
@@ -145,7 +156,7 @@ def check_case(image, root, env, context, cert, mode, apps, expected, require_tr
                   "hardware_encoder": "nvv4l2h264enc", "pairing_preserved": True}
         if require_tray:
             assert "System tray created" in text, text
-            result["tray"] = check_tray(process.pid, env)
+            result["tray"] = check_tray(config, env)
         return result
     finally:
         stop(process)
