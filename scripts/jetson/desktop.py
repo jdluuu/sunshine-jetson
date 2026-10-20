@@ -3,6 +3,7 @@ import getpass
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import uuid
 
@@ -103,4 +104,4 @@ def install_autostart(appdir, config, output=None, port=47989):
     prepared.unlink()
     print("已停用旧 Sunshine 自启动，改为登录桌面后启动本 AppImage。")
     print("程序：" + str(installed))
-    print("立即启动：gtk-launch sunshine-jetson-appimage")
+    print("立即启动：nohup " + shlex.join(args) + " >/dev/null 2>&1 &")

@@ -104,17 +104,20 @@ def check_case(image, root, env, context, cert, mode, apps, expected, require_tr
     state_path = config / "sunshine_state.json"
     state_path.write_text(json.dumps(state))
     port = free_port()
-    log_path = config / "console.log"
+    console_path = config / "console.log"
+    log_path = config / ("desktop.log" if mode == "existing" else "console.log")
     args = [str(image)]
     if mode == "legacy-extract":
         args.append("--appimage-extract-and-run")
+    if mode == "existing":
+        args.append("--desktop")
     args.extend(["--config-dir", str(config), "--port", str(port)])
-    with log_path.open("w") as log:
+    with console_path.open("w") as log:
         process = subprocess.Popen(args, env=env, cwd=root, stdin=subprocess.DEVNULL,
                                    stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     try:
         for _ in range(150):
-            text = log_path.read_text(errors="replace")
+            text = log_path.read_text(errors="replace") if log_path.exists() else ""
             if process.poll() is not None:
                 raise RuntimeError("AppImage exited:\n" + text[-3000:])
             if ("Found encoder jetson: [nvv4l2h264enc]" in text

@@ -1,10 +1,11 @@
 """Installer regression tests; no Jetson, sudo, network, or real services needed."""
 import contextlib
+import ctypes
+import ctypes.util
 import io
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -200,12 +201,29 @@ class DesktopAutostartTests(unittest.TestCase):
         self.assertEqual([p.name for p in (self.config / "autostart").glob("*.desktop")],
                          [desktop.NAME])
 
-    @unittest.skipUnless(shutil.which("gio"), "GLib desktop launcher is not available")
+    @unittest.skipUnless(ctypes.util.find_library("gio-2.0"), "GLib is not available")
     def test_desktop_exec_preserves_paths_and_arguments_with_real_glib_launcher(self):
         self.install()
         entry = self.data / "applications" / desktop.NAME
-        result = subprocess.run(["gio", "launch", str(entry)], capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        # JetPack 5's gio CLI predates `gio launch`; use its stable library API.
+        gio = ctypes.CDLL(ctypes.util.find_library("gio-2.0"))
+        gio.g_desktop_app_info_new_from_filename.argtypes = [ctypes.c_char_p]
+        gio.g_desktop_app_info_new_from_filename.restype = ctypes.c_void_p
+        gio.g_app_info_launch.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                         ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        gio.g_app_info_launch.restype = ctypes.c_int
+        gio.g_object_unref.argtypes = [ctypes.c_void_p]
+        gio.g_object_unref.restype = None
+        app = gio.g_desktop_app_info_new_from_filename(os.fsencode(entry))
+        self.assertTrue(app, "GLib rejected the desktop entry")
+        error = ctypes.c_void_p()
+        try:
+            self.assertEqual(gio.g_app_info_launch(app, None, None, ctypes.byref(error)), 1)
+        finally:
+            gio.g_object_unref(app)
+            if error.value:
+                gio.g_error_free.argtypes = [ctypes.c_void_p]
+                gio.g_error_free(error)
         for _ in range(30):
             if self.marker.exists():
                 break

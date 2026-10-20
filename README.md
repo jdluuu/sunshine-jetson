@@ -46,7 +46,7 @@ AppImage 使用独立目录 `~/.config/sunshine-jetson-appimage/`，不修改原
 
 ```bash
 ./Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage --install-autostart
-gtk-launch sunshine-jetson-appimage
+nohup ~/.local/share/sunshine-jetson-appimage/Sunshine-Jetson.AppImage --desktop >/dev/null 2>&1 &
 ```
 
 命令会停用旧 Sunshine 的 systemd 服务和桌面自启动项，将本版保存到
