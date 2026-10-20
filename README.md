@@ -36,11 +36,8 @@ chmod +x Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage
 ./Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage
 ```
 
-启动前关闭其他 Sunshine，之后访问 `https://localhost:47990` 设置账号并在 Moonlight 配对。
-AppImage 的独立配置保存在 `~/.config/sunshine-jetson-appimage/`，
-不自动迁移旧账号或配对，不修改原有 Sunshine 的配置和启动项。
-支持范围与上表一致，仍需要匹配的 JetPack 驱动和 GStreamer 插件。
-详细依赖、测试和打包说明见下文“构建 AppImage”。
+启动前关闭其他 Sunshine。首次访问 `https://localhost:47990` 设置账号，再在 Moonlight 中配对。
+AppImage 使用独立目录 `~/.config/sunshine-jetson-appimage/`，不修改原版配置或自动启动项。
 
 ## 一键源码安装
 

@@ -7,9 +7,38 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 from install import configure_input, platform_check, runtime_check
 from manage import atomic_text, choose_output, update_config
+
+
+def ensure_apps(path):
+    """Initialize apps or repair the missing env field in early AppImages."""
+    if not path.exists():
+        atomic_text(path, json.dumps({
+            "env": {}, "apps": [{"name": "Desktop", "image-path": "desktop.png"}],
+        }, indent=2) + "\n")
+        return
+    original = path.read_bytes()
+    try:
+        data = json.loads(original)
+    except ValueError as error:
+        raise RuntimeError("应用配置不是有效 JSON，请检查：" + str(path)) from error
+    if not isinstance(data, dict):
+        raise RuntimeError("应用配置缺少 apps 列表，请检查：" + str(path))
+    if "env" in data:
+        return
+    if not isinstance(data.get("apps"), list):
+        raise RuntimeError("应用配置缺少 apps 列表，请检查：" + str(path))
+    # Sunshine 0.20 requires this node even when no custom variables are set.
+    # Preserve custom apps, pairing, and the exact pre-migration file.
+    with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=path.name + ".before-env-fix-",
+            suffix=".bak", dir=path.parent, delete=False) as backup:
+        backup.write(original)
+    data["env"] = {}
+    atomic_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
 def main():
@@ -80,9 +109,7 @@ def main():
         "encoder": "jetson", "capture": "x11", "hevc_mode": 1,
         "output_name": display, "port": args.port,
     }))
-    if not (config_dir / "apps.json").exists():
-        atomic_text(config_dir / "apps.json", json.dumps(
-            {"apps": [{"name": "Desktop", "image-path": "desktop.png"}]}))
+    ensure_apps(config_dir / "apps.json")
     env["SUNSHINE_JETSON_CONFIG_DIR"] = str(config_dir)
     print("配置：" + str(config_dir), flush=True)
     print("管理页面：https://localhost:" + str(args.port + 1), flush=True)

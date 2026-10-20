@@ -16,6 +16,7 @@ jobs:
         run: |
           bash -n scripts/jetson/bootstrap.sh
           python3 -m py_compile scripts/jetson/*.py
+          python3 -m py_compile tests/jetson_appimage_smoke.py
           python3 scripts/jetson/install.py --help
           python3 scripts/jetson/appimage_run.py --help
           python3 scripts/jetson/package_appimage.py --help

@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/jetson"))
 import install
 import manage
+import appimage_run
 
 XRANDR = """Screen 0: minimum 8 x 8, current 1920 x 1080
 DP-0 disconnected (normal left inverted right x axis y axis)
@@ -75,6 +76,56 @@ class BuildMemoryTests(unittest.TestCase):
     def test_unreadable_memory_information_does_not_start_a_build(self):
         with self.assertRaisesRegex(RuntimeError, "无法读取"):
             install.check_build_memory(2, "MemTotal: 16777216 kB\n")
+
+
+class AppImageAppsTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="sunshine apps ")
+        self.addCleanup(self.directory.cleanup)
+        self.path = Path(self.directory.name) / "apps.json"
+
+    def test_fresh_config_includes_required_environment_and_desktop(self):
+        appimage_run.ensure_apps(self.path)
+        data = json.loads(self.path.read_text())
+        self.assertEqual(data["env"], {})
+        self.assertEqual(data["apps"][0]["name"], "Desktop")
+
+    def test_legacy_migration_preserves_custom_apps_and_original_backup(self):
+        original = '{"apps": [{"name": "我的桌面", "cmd": "custom-command"}], "custom": 1}\r\n'.encode()
+        self.path.write_bytes(original)
+        appimage_run.ensure_apps(self.path)
+        data = json.loads(self.path.read_text())
+        self.assertEqual(data, dict(json.loads(original), env={}))
+        backups = list(self.path.parent.glob("apps.json.before-env-fix-*.bak"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+        updated = self.path.read_bytes()
+        appimage_run.ensure_apps(self.path)
+        self.assertEqual(self.path.read_bytes(), updated)
+        self.assertEqual(list(self.path.parent.glob("*.bak")), backups)
+
+    def test_existing_custom_environment_and_empty_app_list_are_untouched(self):
+        original = '{ "env": {"PATH": "$(PATH):$(HOME)/bin"}, "apps": [] }\n'
+        self.path.write_text(original)
+        appimage_run.ensure_apps(self.path)
+        self.assertEqual(self.path.read_text(), original)
+        self.assertEqual(list(self.path.parent.glob("*.bak")), [])
+
+    def test_boost_property_tree_empty_apps_are_preserved(self):
+        original = '{"env": "", "apps": ""}\n'
+        self.path.write_text(original)
+        appimage_run.ensure_apps(self.path)
+        self.assertEqual(self.path.read_text(), original)
+        self.assertEqual(list(self.path.parent.glob("*.bak")), [])
+
+    def test_invalid_config_is_not_overwritten(self):
+        for original in ("{broken", "[]", '{"apps": null}', '{"apps": {}}'):
+            with self.subTest(original=original):
+                self.path.write_text(original)
+                with self.assertRaises(RuntimeError):
+                    appimage_run.ensure_apps(self.path)
+                self.assertEqual(self.path.read_text(), original)
+                self.assertEqual(list(self.path.parent.glob("*.bak")), [])
 
 
 class DeployTests(unittest.TestCase):

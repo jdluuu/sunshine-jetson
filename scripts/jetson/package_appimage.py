@@ -26,7 +26,8 @@ def dependencies(binary):
     return {name: Path(path) for name, path in re.findall(r"^\s*(\S+) => (/\S+) \(", output, re.M)}
 
 
-def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, output, build_jobs):
+def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, output, build_jobs,
+            launcher_source_commit=None):
     if platform.machine() != "aarch64":
         raise RuntimeError("Package on the target aarch64 JetPack 5 system.")
     if output.exists():
@@ -75,6 +76,8 @@ def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, out
                         name: hashlib.sha256((SOURCE / "scripts/jetson" / name).read_bytes()).hexdigest()
                         for name in ("appimage_run.py", "install.py", "manage.py", "package_appimage.py")
                     }}
+        if launcher_source_commit:
+            manifest["launcher_source_commit"] = launcher_source_commit
         linked = dependencies(binary)
         linked.update(dependencies(probe))
         for name, path in sorted(linked.items()):
@@ -119,12 +122,15 @@ def main():
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--runtime-sha256", required=True)
     parser.add_argument("--build-jobs", type=int, default=2, help="Actual compiler parallelism for provenance")
+    parser.add_argument("--launcher-source-commit", help="Git commit containing the packaged launcher sources")
     args = parser.parse_args()
     if args.build_jobs < 1:
         parser.error("--build-jobs must be positive")
+    if args.launcher_source_commit and not re.fullmatch(r"[0-9a-f]{40}", args.launcher_source_commit):
+        parser.error("--launcher-source-commit must be a full Git commit SHA")
     package(args.binary.resolve(), args.probe.resolve(), args.assets.resolve(),
             args.runtime.resolve(), args.runtime_sha256, args.runtime_license.resolve(),
-            args.output.resolve(), args.build_jobs)
+            args.output.resolve(), args.build_jobs, args.launcher_source_commit)
 
 
 if __name__ == "__main__":
