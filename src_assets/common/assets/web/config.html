@@ -710,6 +710,7 @@
         <select id="encoder" class="form-select" v-model="config.encoder">
           <option value="">Autodetect</option>
           <option value="nvenc" v-if="platform === 'windows' || platform === 'linux'">NVIDIA NVENC</option>
+          <option value="jetson" v-if="platform === 'linux'">NVIDIA Jetson (H.264 SDR)</option>
           <option value="quicksync" v-if="platform === 'windows'">Intel QuickSync</option>
           <option value="amdvce" v-if="platform === 'windows'">AMD AMF/VCE</option>
           <option value="vaapi" v-if="platform === 'linux'">VA-API</option>

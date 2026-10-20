@@ -639,6 +639,14 @@ endif()
 
 add_executable(sunshine ${SUNSHINE_TARGET_FILES})
 
+option(SUNSHINE_ENABLE_JETSON "Enable native Jetson GStreamer NVENC backend" OFF)
+if(SUNSHINE_ENABLE_JETSON)
+    pkg_check_modules(JETSON_GST REQUIRED IMPORTED_TARGET gstreamer-app-1.0 gstreamer-video-1.0)
+    target_sources(sunshine PRIVATE src/jetson_encoder.cpp)
+    target_compile_definitions(sunshine PRIVATE SUNSHINE_BUILD_JETSON)
+    list(APPEND SUNSHINE_EXTERNAL_LIBRARIES PkgConfig::JETSON_GST)
+endif()
+
 if(WIN32)
     set_target_properties(sunshine PROPERTIES LINK_SEARCH_START_STATIC 1)
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".dll")

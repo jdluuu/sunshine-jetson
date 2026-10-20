@@ -93,6 +93,12 @@ namespace platf {
 
   fs::path
   appdata() {
+#ifdef SUNSHINE_BUILD_JETSON
+    // Jetson fork, 2026-10-20: allow an isolated installation and pairing state.
+    if (const char *config_dir = getenv("SUNSHINE_JETSON_CONFIG_DIR")) {
+      if (fs::path { config_dir }.is_absolute()) return fs::path { config_dir };
+    }
+#endif
     const char *homedir;
     if ((homedir = getenv("HOME")) == nullptr) {
       homedir = getpwuid(geteuid())->pw_dir;

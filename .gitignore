@@ -12,6 +12,10 @@ cmake-build*
 # npm
 node_modules/
 package-lock.json
+!package-lock.json
+build-jetson/
+__pycache__/
+*.pyc
 
 # Translations
 *.mo

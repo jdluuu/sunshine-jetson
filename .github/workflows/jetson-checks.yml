@@ -1,0 +1,29 @@
+name: Jetson installer checks
+on:
+  push:
+    branches: [jetson-jp5]
+  pull_request:
+    branches: [jetson-jp5]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installer:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check bootstrap and Python syntax
+        run: |
+          bash -n scripts/jetson/bootstrap.sh
+          python3 -m py_compile scripts/jetson/install.py scripts/jetson/manage.py
+          python3 scripts/jetson/install.py --help
+      - name: Installer regression tests
+        run: python3 -m unittest discover -s tests -p 'test_jetson_install.py' -v
+      - name: Verify locked web assets
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          test -s node_modules/vue/dist/vue.min.js
+          test -s node_modules/bootstrap/dist/js/bootstrap.bundle.min.js
+          test -s node_modules/@fortawesome/fontawesome-free/css/all.min.css
+      - name: Check whitespace
+        run: git diff --check

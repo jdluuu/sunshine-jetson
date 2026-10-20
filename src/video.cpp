@@ -19,6 +19,9 @@ extern "C" {
 #include "platform/common.h"
 #include "sync.h"
 #include "video.h"
+#ifdef SUNSHINE_BUILD_JETSON
+  #include "jetson_encoder.h"
+#endif
 
 #ifdef _WIN32
 extern "C" {
@@ -380,6 +383,22 @@ namespace video {
     int inject;
   };
 
+#ifdef SUNSHINE_BUILD_JETSON
+  class jetson_device_t: public platf::hwdevice_t {
+  public:
+    jetson::encoder encoder;
+    std::shared_ptr<platf::img_t> image;
+    ~jetson_device_t() override {
+      av_frame_free(&frame);
+    }
+    int convert(platf::img_t &img) override {
+      if (img.pixel_pitch != 4) return -1;
+      image = img.shared_from_this();
+      return 0;
+    }
+  };
+#endif
+
   struct sync_session_ctx_t {
     safe::signal_t *join_event;
     safe::mail_raw_t::event_t<bool> shutdown_event;
@@ -702,7 +721,22 @@ namespace video {
   };
 #endif
 
+#ifdef SUNSHINE_BUILD_JETSON
+  static encoder_t jetson_encoder {
+    "jetson"sv,
+    AV_HWDEVICE_TYPE_NONE, AV_HWDEVICE_TYPE_NONE, AV_PIX_FMT_NONE,
+    AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV420P10,
+    { {}, {}, {}, std::nullopt, "unsupported" },
+    { {}, {}, {}, std::nullopt, "nvv4l2h264enc" },
+    H264_ONLY | PARALLEL_ENCODING,
+    nullptr
+  };
+#endif
+
   static const std::vector<encoder_t *> encoders {
+#ifdef SUNSHINE_BUILD_JETSON
+    &jetson_encoder,
+#endif
 #ifndef __APPLE__
     &nvenc,
 #endif
@@ -997,6 +1031,29 @@ namespace video {
   encode(int64_t frame_nr, session_t &session, frame_t::pointer frame, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, const std::optional<std::chrono::steady_clock::time_point> &frame_timestamp) {
     frame->pts = frame_nr;
 
+#ifdef SUNSHINE_BUILD_JETSON
+    if (auto device = dynamic_cast<jetson_device_t *>(session.device.get())) {
+      jetson::encoded_frame output;
+      std::string error_message;
+      if (!device->image ||
+          !device->encoder.encode(device->image->data, device->image->row_pitch,
+                                  frame->pict_type == AV_PICTURE_TYPE_I, output, error_message)) {
+        BOOST_LOG(error) << "Jetson NVENC: " << error_message;
+        return -1;
+      }
+      auto packet = std::make_unique<packet_raw_t>(channel_data);
+      if (!packet->av_packet ||
+          av_new_packet(packet->av_packet, static_cast<int>(output.bytes.size())) < 0) return -1;
+      std::memcpy(packet->av_packet->data, output.bytes.data(), output.bytes.size());
+      packet->av_packet->pts = packet->av_packet->dts = frame_nr;
+      if (output.keyframe) packet->av_packet->flags |= AV_PKT_FLAG_KEY;
+      packet->frame_timestamp = frame_timestamp;
+      packet->replacements = &session.replacements;
+      packets->raise(std::move(packet));
+      return 0;
+    }
+#endif
+
     auto &ctx = session.ctx;
 
     auto &sps = session.sps;
@@ -1061,6 +1118,29 @@ namespace video {
 
   std::optional<session_t>
   make_session(platf::display_t *disp, const encoder_t &encoder, const config_t &config, int width, int height, std::shared_ptr<platf::hwdevice_t> &&hwdevice) {
+#ifdef SUNSHINE_BUILD_JETSON
+    if (encoder.name == "jetson") {
+      if (config.videoFormat != 0 || config.dynamicRange != 0) return std::nullopt;
+      auto device = std::make_shared<jetson_device_t>();
+      std::string error_message;
+      if (!device->encoder.init(
+            { width, height, config.width, config.height, config.framerate, config.bitrate,
+              config.numRefFrames, config.encoderCscMode >> 1, bool(config.encoderCscMode & 1) },
+            error_message)) {
+        BOOST_LOG(error) << "Jetson NVENC initialization: " << error_message;
+        return std::nullopt;
+      }
+      device->frame = av_frame_alloc();
+      if (!device->frame) return std::nullopt;
+      device->frame->width = config.width;
+      device->frame->height = config.height;
+      device->frame->format = AV_PIX_FMT_YUV420P;
+      BOOST_LOG(info) << "Jetson hardware H.264: " << config.width << "x" << config.height
+                     << "@" << config.framerate << " via nvvidconv + nvv4l2h264enc";
+      return session_t { ctx_t {}, std::move(device), 0 };
+    }
+#endif
+
     bool hardware = encoder.base_dev_type != AV_HWDEVICE_TYPE_NONE;
 
     auto &video_format = config.videoFormat == 0 ? encoder.h264 : encoder.hevc;
