@@ -4,9 +4,11 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/jetson"))
 import install
 import manage
 import appimage_run
+import desktop
 
 XRANDR = """Screen 0: minimum 8 x 8, current 1920 x 1080
 DP-0 disconnected (normal left inverted right x axis y axis)
@@ -128,6 +131,90 @@ class AppImageAppsTests(unittest.TestCase):
                 self.assertEqual(list(self.path.parent.glob("*.bak")), [])
 
 
+class DesktopAutostartTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix="sunshine desktop ")
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.config = self.root / "config"
+        self.data = self.root / 'data $HOME `tick` "quote" 100% back\\slash'
+        self.system = self.root / "system"
+        self.appdir = self.root / "AppDir"
+        self.appdir.mkdir()
+        (self.appdir / "sunshine.png").write_bytes(b"test-icon")
+        self.marker = self.root / "launched.json"
+        self.image = self.root / "Downloaded Sunshine.AppImage"
+        self.image.write_text(
+            "#!/usr/bin/python3\nimport json, sys\nfrom pathlib import Path\n"
+            "Path(" + repr(str(self.marker)) + ").write_text(json.dumps(sys.argv[1:]))\n")
+        self.image.chmod(0o755)
+        self.env = patch.dict(os.environ, {
+            "APPIMAGE": str(self.image), "XDG_CONFIG_HOME": str(self.config),
+            "XDG_DATA_HOME": str(self.data), "XDG_CONFIG_DIRS": str(self.system),
+        })
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        output = contextlib.redirect_stdout(io.StringIO())
+        output.__enter__()
+        self.addCleanup(output.__exit__, None, None, None)
+
+    def install(self):
+        with patch.object(desktop, "old_services", return_value=[]):
+            desktop.install_autostart(self.appdir, self.config / "custom config", "DP-1", 58989)
+
+    def test_switch_disables_old_services_and_only_sunshine_desktop_entries(self):
+        autostart = self.config / "autostart"
+        autostart.mkdir(parents=True)
+        old = autostart / "sunshine.desktop"
+        original = "[Desktop Entry]\nType=Application\nExec=/usr/bin/sunshine\n"
+        old.write_text(original)
+        unrelated = autostart / "unrelated.desktop"
+        unrelated.write_text("[Desktop Entry]\nExec=unrelated\n")
+        system = self.system / "autostart"
+        system.mkdir(parents=True)
+        (system / "sunshine-system.desktop").write_text(original)
+        with patch.object(desktop, "old_services", return_value=[
+                (True, "sunshine.service"), (False, "sunshine@fast.service")]), \
+                patch.object(desktop.subprocess, "run") as run:
+            desktop.install_autostart(self.appdir, self.config / "custom config")
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ["systemctl", "--user", "disable", "--now", "sunshine.service"])
+        self.assertEqual(run.call_args_list[1].args[0],
+                         ["sudo", "systemctl", "disable", "--now", "sunshine@fast.service"])
+        self.assertIn("Hidden=true", old.read_text())
+        self.assertIn("Hidden=true", (autostart / "sunshine-system.desktop").read_text())
+        self.assertEqual((system / "sunshine-system.desktop").read_text(), original)
+        self.assertEqual(unrelated.read_text(), "[Desktop Entry]\nExec=unrelated\n")
+        backups = list((self.data / "sunshine-jetson-appimage/autostart-backups").rglob("*.desktop"))
+        self.assertEqual([p.read_text() for p in backups], [original])
+        entry = (autostart / desktop.NAME).read_text()
+        self.assertIn("Terminal=false", entry)
+        self.assertEqual(entry, (self.data / "applications" / desktop.NAME).read_text())
+
+    def test_reinstall_updates_fixed_image_without_duplicate_entries(self):
+        self.install()
+        self.image.write_text("#!/bin/sh\nexit 0\n")
+        self.install()
+        self.assertEqual((self.data / "sunshine-jetson-appimage/Sunshine-Jetson.AppImage").read_bytes(),
+                         self.image.read_bytes())
+        self.assertEqual([p.name for p in (self.config / "autostart").glob("*.desktop")],
+                         [desktop.NAME])
+
+    @unittest.skipUnless(shutil.which("gio"), "GLib desktop launcher is not available")
+    def test_desktop_exec_preserves_paths_and_arguments_with_real_glib_launcher(self):
+        self.install()
+        entry = self.data / "applications" / desktop.NAME
+        result = subprocess.run(["gio", "launch", str(entry)], capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for _ in range(30):
+            if self.marker.exists():
+                break
+            time.sleep(0.1)
+        self.assertEqual(json.loads(self.marker.read_text()),
+                         ["--config-dir", str(self.config / "custom config"), "--desktop",
+                          "--output", "DP-1", "--port", "58989"])
+
+
 class DeployTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="sunshine installer ")
@@ -156,6 +243,7 @@ class DeployTests(unittest.TestCase):
         self.assertEqual((self.root / "config/sunshine_state.json").read_text(), "synthetic-pairing-fixture")
         self.assertEqual((self.root / "backups/new/sunshine.conf").read_text(), "audio_sink = user-choice\n")
         self.assertEqual(json.loads((self.root / "preferences.json").read_text())["output"], "DP-1")
+        self.assertEqual(json.loads((self.root / "config/apps.json").read_text())["env"], {})
         start.assert_called_once_with(self.root)
 
     def test_failed_launch_restores_previous_program(self):

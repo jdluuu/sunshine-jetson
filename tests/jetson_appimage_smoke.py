@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import socket
@@ -47,7 +48,38 @@ def stop(process):
         process.wait()
 
 
-def check_case(image, root, env, context, cert, mode, apps, expected):
+def check_tray(pid, env):
+    def call(destination, path, method, *args):
+        return subprocess.check_output(
+            ["gdbus", "call", "--session", "--dest", destination, "--object-path", path,
+             "--method", method] + list(args), env=env, text=True, stderr=subprocess.DEVNULL)
+
+    for _ in range(30):
+        items = call("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher",
+                     "org.freedesktop.DBus.Properties.Get",
+                     "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems")
+        for item in re.findall(r"'([^']+/[^']+)'", items):
+            name, path = item.split("/", 1)
+            try:
+                owner = call("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                             "org.freedesktop.DBus.GetConnectionUnixProcessID", name)
+                if int(re.search(r"uint32 (\d+)", owner).group(1)) != pid:
+                    continue
+                icon = call(name, "/" + path, "org.freedesktop.DBus.Properties.Get",
+                            "org.kde.StatusNotifierItem", "IconName")
+                status = call(name, "/" + path, "org.freedesktop.DBus.Properties.Get",
+                              "org.kde.StatusNotifierItem", "Status")
+                icon_path = Path(re.search(r"'([^']+)'", icon).group(1))
+                assert icon_path.is_file() and icon_path.name == "sunshine.png", icon
+                assert "'Active'" in status, status
+                return {"registered": True, "icon": icon_path.name, "status": "Active"}
+            except subprocess.CalledProcessError:
+                continue
+        time.sleep(0.1)
+    raise RuntimeError("Sunshine tray was not registered with the desktop")
+
+
+def check_case(image, root, env, context, cert, mode, apps, expected, require_tray):
     config = root / mode
     config.mkdir(mode=0o700)
     path = config / "apps.json"
@@ -74,7 +106,9 @@ def check_case(image, root, env, context, cert, mode, apps, expected):
             text = log_path.read_text(errors="replace")
             if process.poll() is not None:
                 raise RuntimeError("AppImage exited:\n" + text[-3000:])
-            if "Found encoder jetson: [nvv4l2h264enc]" in text and "Configuration UI available" in text:
+            if ("Found encoder jetson: [nvv4l2h264enc]" in text
+                    and "Configuration UI available" in text
+                    and (not require_tray or "System tray created" in text)):
                 break
             time.sleep(0.2)
         else:
@@ -107,8 +141,12 @@ def check_case(image, root, env, context, cert, mode, apps, expected):
         else:
             assert not backups
         assert json.loads(state_path.read_text())["root"] == state["root"]
-        return {"mode": mode, "applist_status": 200, "apps": names,
-                "hardware_encoder": "nvv4l2h264enc", "pairing_preserved": True}
+        result = {"mode": mode, "applist_status": 200, "apps": names,
+                  "hardware_encoder": "nvv4l2h264enc", "pairing_preserved": True}
+        if require_tray:
+            assert "System tray created" in text, text
+            result["tray"] = check_tray(process.pid, env)
+        return result
     finally:
         stop(process)
 
@@ -117,6 +155,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--require-tray", action="store_true")
     args = parser.parse_args()
     image = args.image.resolve(strict=True)
     env = os.environ.copy()
@@ -146,7 +185,8 @@ def main():
         ]
         results = []
         for mode, apps, expected in cases:
-            result = check_case(portable, root, env, context, cert, mode, apps, expected)
+            result = check_case(portable, root, env, context, cert, mode, apps, expected,
+                                args.require_tray)
             results.append(result)
             print("PASS", json.dumps(result), flush=True)
     evidence = {"image_sha256": hashlib.sha256(image.read_bytes()).hexdigest(),

@@ -17,6 +17,7 @@ HOST = re.compile(
     r"|lib(?:gst|glib-|gobject-|gmodule-|gthread-|gio-|orc-|ffi\.|pcre\.|pulse|dbus-|systemd\.|udev\.)"
     r"|lib(?:X|xcb|drm|GL|EGL|GLES|nvidia|nv)|ld-linux)"
 )
+GTK_HOST = re.compile(r"^lib(?:gtk-3|gdk-3|gdk_pixbuf-2|pango|cairo|atk-1|atspi)")
 
 
 def dependencies(binary):
@@ -27,7 +28,7 @@ def dependencies(binary):
 
 
 def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, output, build_jobs,
-            launcher_source_commit=None):
+            launcher_source_commit=None, binary_source_commit=None):
     if platform.machine() != "aarch64":
         raise RuntimeError("Package on the target aarch64 JetPack 5 system.")
     if output.exists():
@@ -48,7 +49,7 @@ def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, out
         shutil.copy2(binary, appdir / "usr/bin/sunshine")
         shutil.copy2(probe, appdir / "usr/bin/jetson-probe")
         shutil.copytree(assets, appdir / "usr/share/sunshine", dirs_exist_ok=True)
-        for name in ("appimage_run.py", "install.py", "manage.py"):
+        for name in ("appimage_run.py", "install.py", "manage.py", "desktop.py"):
             shutil.copy2(SOURCE / "scripts/jetson" / name, appdir / "usr/share/jetson" / name)
         shutil.copy2(SOURCE / "LICENSE", appdir / "usr/share/licenses/Sunshine-GPL-3.0")
         shutil.copy2(SOURCE / "third-party/ffmpeg-linux-aarch64/LICENSE",
@@ -58,7 +59,7 @@ def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, out
         (appdir / ".DirIcon").symlink_to("sunshine.png")
         (appdir / "sunshine.desktop").write_text(
             "[Desktop Entry]\nType=Application\nName=Sunshine Jetson\nExec=AppRun\n"
-            "Icon=sunshine\nTerminal=true\nCategories=Network;RemoteAccess;\n"
+            "Icon=sunshine\nTerminal=false\nCategories=Network;RemoteAccess;\n"
             "X-AppImage-Arch=aarch64\n")
         (appdir / "AppRun").write_text(
             '#!/bin/sh\nset -eu\nAPPDIR_PATH=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
@@ -66,7 +67,7 @@ def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, out
         (appdir / "AppRun").chmod(0o755)
         manifest = {"source": "https://github.com/jdluuu/sunshine-jetson",
                     "package_version": "v0.20.0-jetson.2",
-                    "encoder_source_commit": "b469cc5b856363eb3783770f57373e22743ba55d",
+                    "binary_source_commit": binary_source_commit,
                     "target": "Orin NX / L4T R35 / Ubuntu 20.04 / Xorg",
                     "build_jobs": build_jobs,
                     "binary_sha256": hashlib.sha256(data).hexdigest(),
@@ -74,14 +75,15 @@ def package(binary, probe, assets, runtime, runtime_sha256, runtime_license, out
                     "runtime_sha256": runtime_sha256, "bundled": {}, "host": [],
                     "launcher_sources": {
                         name: hashlib.sha256((SOURCE / "scripts/jetson" / name).read_bytes()).hexdigest()
-                        for name in ("appimage_run.py", "install.py", "manage.py", "package_appimage.py")
+                        for name in ("appimage_run.py", "install.py", "manage.py", "desktop.py",
+                                     "package_appimage.py")
                     }}
         if launcher_source_commit:
             manifest["launcher_source_commit"] = launcher_source_commit
         linked = dependencies(binary)
         linked.update(dependencies(probe))
         for name, path in sorted(linked.items()):
-            if HOST.match(name):
+            if HOST.match(name) or GTK_HOST.match(name):
                 manifest["host"].append(name)
                 continue
             shutil.copy2(path.resolve(), appdir / "usr/lib" / name)
@@ -123,14 +125,17 @@ def main():
     parser.add_argument("--runtime-sha256", required=True)
     parser.add_argument("--build-jobs", type=int, default=2, help="Actual compiler parallelism for provenance")
     parser.add_argument("--launcher-source-commit", help="Git commit containing the packaged launcher sources")
+    parser.add_argument("--binary-source-commit", help="Git commit used to build the Sunshine binary")
     args = parser.parse_args()
     if args.build_jobs < 1:
         parser.error("--build-jobs must be positive")
     if args.launcher_source_commit and not re.fullmatch(r"[0-9a-f]{40}", args.launcher_source_commit):
         parser.error("--launcher-source-commit must be a full Git commit SHA")
+    if args.binary_source_commit and not re.fullmatch(r"[0-9a-f]{40}", args.binary_source_commit):
+        parser.error("--binary-source-commit must be a full Git commit SHA")
     package(args.binary.resolve(), args.probe.resolve(), args.assets.resolve(),
             args.runtime.resolve(), args.runtime_sha256, args.runtime_license.resolve(),
-            args.output.resolve(), args.build_jobs, args.launcher_source_commit)
+            args.output.resolve(), args.build_jobs, args.launcher_source_commit, args.binary_source_commit)
 
 
 if __name__ == "__main__":

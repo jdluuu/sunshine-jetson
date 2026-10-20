@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import sys
 
-from manage import atomic_link, atomic_text, choose_output, own_pid, start, stop
+from manage import atomic_link, atomic_text, choose_output, ensure_apps, own_pid, start, stop
 
 SOURCE = Path(__file__).resolve().parents[2]
 SUBMODULES = [
@@ -124,8 +124,7 @@ def deploy(stage, root, output, autostart):
         settings["output"] = output
     atomic_text(preferences, json.dumps(settings))
     apps = config / "apps.json"
-    if not apps.exists():
-        atomic_text(apps, json.dumps({"apps": [{"name": "Desktop", "image-path": "desktop.png"}]}))
+    ensure_apps(apps)
     # No modifications to the original Sunshine config, binary, or service.
     stop(root)
     atomic_link(current, stage)
@@ -232,6 +231,7 @@ def main():
     shutil.copytree(SOURCE / "src_assets/common/assets", assets, dirs_exist_ok=True)
     shutil.copytree(SOURCE / "src_assets/linux/assets", assets, dirs_exist_ok=True)
     shutil.copytree(SOURCE / "node_modules", assets / "web/node_modules", dirs_exist_ok=True)
+    shutil.copy2(SOURCE / "sunshine.png", assets / "sunshine.png")
     shutil.copy2(SOURCE / "LICENSE", stage / "LICENSE")
     atomic_text(stage / "build-info.json", json.dumps({
         "source": "https://github.com/jdluuu/sunshine-jetson", "commit": commit,

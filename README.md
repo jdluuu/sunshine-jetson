@@ -37,7 +37,22 @@ chmod +x Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage
 ```
 
 启动前关闭其他 Sunshine。首次访问 `https://localhost:47990` 设置账号，再在 Moonlight 中配对。
-AppImage 使用独立目录 `~/.config/sunshine-jetson-appimage/`，不修改原版配置或自动启动项。
+AppImage 使用独立目录 `~/.config/sunshine-jetson-appimage/`，不修改原版配置。
+启动后右上角显示 Sunshine 图标，可以打开管理页面或退出。
+
+### 切换开机自启动
+
+关闭正在运行的 Sunshine，在 AppImage 所在目录执行：
+
+```bash
+./Sunshine-Jetson-v0.20.0-jetson.2-jp5-aarch64.AppImage --install-autostart
+gtk-launch sunshine-jetson-appimage
+```
+
+命令会停用旧 Sunshine 的 systemd 服务和桌面自启动项，将本版保存到
+`~/.local/share/sunshine-jetson-appimage/Sunshine-Jetson.AppImage`，
+并设为登录 Xorg 桌面后自动启动。旧桌面启动项会先备份；原版配置和配对保留。
+自启动不弹出终端，日志位于 `~/.config/sunshine-jetson-appimage/desktop.log`。
 
 ## 一键源码安装
 
@@ -149,7 +164,7 @@ chmod +x Sunshine-Jetson-jp5-aarch64.AppImage
 
 默认配置、账号和配对保存在 `~/.config/sunshine-jetson-appimage/`，
 首次使用需访问 `https://localhost:47990` 设置账号并重新配对。
-本启动器不设置自动启动，也不修改已有 Sunshine 的配置。
+直接运行不会设置自动启动；使用 `--install-autostart` 切换桌面自启动。
 正常关闭使用终端 `Ctrl+C`。缺少 FUSE 时可加 `--appimage-extract-and-run`。
 系统仍需提供 Python 3、GStreamer 工具和 base/good/bad 插件、
 Xorg/PulseAudio、`xrandr`；`--setup-input` 需要 sudo、acl、kmod 和 udev。

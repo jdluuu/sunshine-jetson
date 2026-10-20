@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+import tempfile
 import uuid
 
 
@@ -54,6 +55,35 @@ def atomic_text(path, content, mode=0o600):
     temporary.write_text(content)
     temporary.chmod(mode)
     temporary.replace(path)
+
+
+def ensure_apps(path):
+    """Initialize apps or repair the missing env field in early AppImages."""
+    if not path.exists():
+        atomic_text(path, json.dumps({
+            "env": {}, "apps": [{"name": "Desktop", "image-path": "desktop.png"}],
+        }, indent=2) + "\n")
+        return
+    original = path.read_bytes()
+    try:
+        data = json.loads(original)
+    except ValueError as error:
+        raise RuntimeError("应用配置不是有效 JSON，请检查：" + str(path)) from error
+    if not isinstance(data, dict):
+        raise RuntimeError("应用配置缺少 apps 列表，请检查：" + str(path))
+    if "env" in data:
+        return
+    if not isinstance(data.get("apps"), list):
+        raise RuntimeError("应用配置缺少 apps 列表，请检查：" + str(path))
+    # Sunshine 0.20 requires this node even when no custom variables are set.
+    # Preserve custom apps, pairing, and the exact pre-migration file.
+    with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=path.name + ".before-env-fix-",
+            suffix=".bak", dir=path.parent, delete=False) as backup:
+        backup.write(original)
+    data["env"] = {}
+    atomic_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
 
 
 def atomic_link(path, target):
@@ -120,7 +150,9 @@ def run(root):
     }))
     if not os.access("/dev/uinput", os.W_OK):
         raise RuntimeError("当前用户无法写入 /dev/uinput；请重新运行安装脚本设置输入权限。")
+    ensure_apps(config_dir / "apps.json")
     env["SUNSHINE_JETSON_CONFIG_DIR"] = str(config_dir)
+    env["SUNSHINE_TRAY_ICON"] = str((root / "current/share/sunshine/sunshine.png").resolve())
     atomic_text(root / "run.pid", str(os.getpid()))
     binary = (root / "current/bin/sunshine").resolve(strict=True)
     os.execve(str(binary), [str(binary), str(config)], env)
